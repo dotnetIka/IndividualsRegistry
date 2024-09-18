@@ -1,0 +1,89 @@
+# CI/CD Pipeline to deploy to TEST and PROD environment
+
+trigger:
+  branches:
+    include:
+    - refs/heads/development
+resources:
+  pipelines:
+    - pipeline: BuildPipeline
+      source: 'CredoCorePipeline'
+  repositories:
+    - repository: self
+      type: git
+    - repository: templates
+      type: git
+      name: CredoCoreDevOpsTemplate/CredoCoreDevOpsTemplate
+      #ref: 'refs/tags/v0.0.1' uncomment refs to make sure that we always retrieve at each build the same version of the templates.
+variables:
+  - group: AppSettings
+  - name: ArtifactName
+    value: drop
+stages:
+  - stage: Build
+    displayName: Build stage
+    pool:
+      name: AgentPool-105.201
+    jobs:
+      - template: Jobs/dot-net-build-solution.yaml@templates #Template from the CredoCoreDevOpsTemplate repository
+        parameters:
+          artifactName: ${{ variables.ArtifactName }}
+          pathToProjects: '**/IndividualsRegistry.Api.csproj'
+  
+  ##################### Deploy To Dev Server #####################
+  - stage: DeployToTest
+    displayName: TEST
+    variables:
+      - group: AppSettings_Test
+      - group: DB-Test
+    pool:
+      name: AgentPool-105.201
+    jobs:
+      - template: Jobs/deploy-to-iis-server.yaml@templates
+        parameters:
+          Env: 'ENV-TEST.V082-CSS-T-APP1'
+          AppName: 'IndividualsRegistry'
+          AppRoot: 'C:\Applications\CorePlatform'
+          ArchiveExistingVersion: false
+          TransformFiles: |
+            appsettings.json
+  
+  ##################### Deploy To Production NODE1 Server #####################
+  - stage: DeployToProductionNode1
+    displayName: PROD-1
+    dependsOn: Build
+    condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    
+    variables:
+      - group: AppSettings_Prod
+      - group: DB-Prod
+    pool:
+      name: 115.71
+    jobs:
+      - template: Jobs/deploy-to-iis-server.yaml@templates
+        parameters:
+          Env: 'ENV-PROD.AZURE-COREAPI'
+          AppName: 'IndividualsRegistry'
+          AppRoot: 'C:\Applications\CorePlatform'
+          TransformFiles: |
+            appsettings.json
+  
+  ##################### Deploy To Production NODE2 Server #####################
+  - stage: DeployToProductionNode2
+    displayName: PROD-2
+    dependsOn: DeployToProductionNode1
+    condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/Development'))
+    
+    variables:
+      - group: AppSettings_Prod
+      - group: DB-Prod
+    pool:
+      name: 115.71
+    jobs:
+      - template: Jobs/deploy-to-iis-server.yaml@templates
+        parameters:
+          Env: 'ENV-PROD.AZURE-PIPELINE'
+          AppName: 'IndividualsRegistry'
+          AppRoot: 'C:\Applications\CorePlatform'
+          TransformFiles: |
+            appsettings.json
